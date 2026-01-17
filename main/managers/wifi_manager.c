@@ -3985,75 +3985,82 @@ void wifi_manager_print_scan_results_with_oui_limit(uint16_t limit) {
         char vendor[64] = {0};
         bool has_vendor = ouis_lookup_vendor(mac_str, vendor, sizeof(vendor));
 
-        glog("[%u] SSID: %s,\n"
-             "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
-             "     RSSI: %d,\n"
-             "     Channel: %d,\n",
-             (unsigned)k, sanitized_ssid,
-             scanned_aps[i].bssid[0], scanned_aps[i].bssid[1],
-             scanned_aps[i].bssid[2], scanned_aps[i].bssid[3],
-             scanned_aps[i].bssid[4], scanned_aps[i].bssid[5],
-             scanned_aps[i].rssi,
-             scanned_aps[i].primary);
+        // glog("[%u] SSID: %s,\n"
+        //      "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
+        //      "     RSSI: %d,\n"
+        //      "     Channel: %d,\n",
+        //      (unsigned)k, sanitized_ssid,
+        //      scanned_aps[i].bssid[0], scanned_aps[i].bssid[1],
+        //      scanned_aps[i].bssid[2], scanned_aps[i].bssid[3],
+        //      scanned_aps[i].bssid[4], scanned_aps[i].bssid[5],
+        //      scanned_aps[i].rssi,
+        //      scanned_aps[i].primary);
+
+        // glog("[%u] SSID: %s\n",
+        //      (unsigned)k, sanitized_ssid);
 
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
         {
             int ch = scanned_aps[i].primary;
             const char *band_str = (ch > 14) ? "5GHz" : "2.4GHz";
-            glog("     Band: %s,\n", band_str);
+            // glog("     Band: %s,\n", band_str);
+
+            glog("[%u] %s (%s)\n",
+             (unsigned)k, sanitized_ssid, band_str);
+
             
-            const char *auth_str = "Unknown";
-            const char *pmf_str = NULL;
+            // const char *auth_str = "Unknown";
+            // const char *pmf_str = NULL;
             
-            switch (scanned_aps[i].authmode) {
-                case WIFI_AUTH_OPEN:
-                    auth_str = "Open";
-                    break;
-                case WIFI_AUTH_WEP:
-                    auth_str = "WEP";
-                    break;
-                case WIFI_AUTH_WPA_PSK:
-                    auth_str = "WPA";
-                    break;
-                case WIFI_AUTH_WPA2_PSK:
-                    auth_str = "WPA2";
-                    break;
-                case WIFI_AUTH_WPA_WPA2_PSK:
-                    auth_str = "WPA/WPA2";
-                    break;
-                case WIFI_AUTH_WPA2_ENTERPRISE:
-                    auth_str = "WPA2-Enterprise";
-                    break;
-                case WIFI_AUTH_WPA3_PSK:
-                    auth_str = "WPA3";
-                    pmf_str = "Required";
-                    break;
-                case WIFI_AUTH_WPA2_WPA3_PSK:
-                    auth_str = "WPA2/WPA3";
-                    pmf_str = "Required (WPA3)";
-                    break;
-                case WIFI_AUTH_WAPI_PSK:
-                    auth_str = "WAPI";
-                    break;
-                case WIFI_AUTH_WPA3_ENTERPRISE:
-                    auth_str = "WPA3-Enterprise";
-                    pmf_str = "Required";
-                    break;
-                default:
-                    auth_str = "Unknown";
-                    break;
-            }
+            // switch (scanned_aps[i].authmode) {
+            //     case WIFI_AUTH_OPEN:
+            //         auth_str = "Open";
+            //         break;
+            //     case WIFI_AUTH_WEP:
+            //         auth_str = "WEP";
+            //         break;
+            //     case WIFI_AUTH_WPA_PSK:
+            //         auth_str = "WPA";
+            //         break;
+            //     case WIFI_AUTH_WPA2_PSK:
+            //         auth_str = "WPA2";
+            //         break;
+            //     case WIFI_AUTH_WPA_WPA2_PSK:
+            //         auth_str = "WPA/WPA2";
+            //         break;
+            //     case WIFI_AUTH_WPA2_ENTERPRISE:
+            //         auth_str = "WPA2-Enterprise";
+            //         break;
+            //     case WIFI_AUTH_WPA3_PSK:
+            //         auth_str = "WPA3";
+            //         pmf_str = "Required";
+            //         break;
+            //     case WIFI_AUTH_WPA2_WPA3_PSK:
+            //         auth_str = "WPA2/WPA3";
+            //         pmf_str = "Required (WPA3)";
+            //         break;
+            //     case WIFI_AUTH_WAPI_PSK:
+            //         auth_str = "WAPI";
+            //         break;
+            //     case WIFI_AUTH_WPA3_ENTERPRISE:
+            //         auth_str = "WPA3-Enterprise";
+            //         pmf_str = "Required";
+            //         break;
+            //     default:
+            //         auth_str = "Unknown";
+            //         break;
+            // }
             
-            if (pmf_str) {
-                glog("     Security: %s\n     PMF: %s\n", auth_str, pmf_str);
-            } else {
-                glog("     Security: %s\n", auth_str);
-            }
+            // if (pmf_str) {
+            //     glog("     Security: %s\n     PMF: %s\n", auth_str, pmf_str);
+            // } else {
+            //     glog("     Security: %s\n", auth_str);
+            // }
         }
 #endif
-        if (has_vendor) {
-            glog("     Vendor: %s\n", vendor);
-        }
+        // if (has_vendor) {
+        //     glog("     Vendor: %s\n", vendor);
+        // }
     }
 
     heap_caps_free(indices);
