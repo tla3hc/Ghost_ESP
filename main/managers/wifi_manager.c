@@ -3965,8 +3965,8 @@ void wifi_manager_print_scan_results_with_oui_limit(uint16_t limit) {
         }
     }
 
-    for (uint16_t k = 0; k < limit; ++k) {
-        uint16_t i = indices[k];
+    for (int k = (int)limit - 1; k >= 0; --k) {
+        uint16_t i = indices[(uint16_t)k];
         char sanitized_ssid[33];
         sanitize_ssid_and_check_hidden(scanned_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
 
@@ -3981,7 +3981,7 @@ void wifi_manager_print_scan_results_with_oui_limit(uint16_t limit) {
              "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
              "     RSSI: %d,\n"
              "     Channel: %d,\n",
-             k, sanitized_ssid,
+             (unsigned)k, sanitized_ssid,
              scanned_aps[i].bssid[0], scanned_aps[i].bssid[1],
              scanned_aps[i].bssid[2], scanned_aps[i].bssid[3],
              scanned_aps[i].bssid[4], scanned_aps[i].bssid[5],
