@@ -524,7 +524,7 @@ void cmd_wifi_scan_results(int argc, char **argv) {
     glog("WiFi scan results displaying with OUI matching.\n");
 
     // Default limit if not provided
-    uint16_t limit = 10;
+    uint16_t limit = 100;
     if (argc > 1) {
         char *endptr = NULL;
         long val = strtol(argv[1], &endptr, 10);
@@ -563,7 +563,7 @@ void handle_list(int argc, char **argv) {
 
         // If numeric argument provided, interpret as limit for top-N strongest APs
         char *endptr = NULL;
-        long val = strtol(argv[1], &endptr, 10);
+        long val = strtol(argv[1], &endptr, 100);
         if (endptr != argv[1] && *endptr == '\0' && val > 0) {
             uint16_t limit = (uint16_t)val;
             wifi_manager_print_scan_results_with_oui_limit(limit);

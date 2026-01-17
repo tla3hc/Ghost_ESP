@@ -292,4 +292,6 @@ void wifi_manager_track_ap(void);
 void wifi_manager_track_sta(void);
 void wifi_manager_stop_tracking(void);
 
+bool wifi_set_channel_with_retry(int channel, int max_retries, int delay_ms);
+
 #endif // WIFI_MANAGER_H

@@ -56,14 +56,14 @@
 
 // Defines for Station Scan Channel Hopping
 #define SCANSTA_CHANNEL_HOP_INTERVAL_MS 250 // Hop channel every 250ms
-#define SCANSTA_MAX_WIFI_CHANNEL 13         // Scan channels 1-13
+#define SCANSTA_MAX_WIFI_CHANNEL 165        // Support both 2.4GHz (1-14) and 5GHz (36-165)
 
 // Defines for Wireshark channel validation
 #if !defined(MAX_WIFI_CHANNEL)
 #if defined(CONFIG_IDF_TARGET_ESP32C5)
 #define MAX_WIFI_CHANNEL 165
 #else
-#define MAX_WIFI_CHANNEL 13
+#define MAX_WIFI_CHANNEL 165  // Support 5GHz on all platforms
 #endif
 #endif
 
@@ -2081,9 +2081,38 @@ esp_err_t wifi_manager_broadcast_deauth(uint8_t bssid[6], int channel, uint8_t m
 
     return ESP_OK;
 }
+
+bool wifi_set_channel_with_retry(int channel, int max_retries, int delay_ms) {
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        if (err == ESP_OK) {
+            return true; // Success
+        }
+        printf("Retry %d: Failed to set channel %d: %s\n", attempt + 1, channel, esp_err_to_name(err));
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    }
+    return false; // All retries failed
+}
+
 void wifi_deauth_task(void *param) {
     // WiFi should already be started by wifi_manager_start_deauth()
-    // Just reset packet counter
+    // Ensure WiFi is in AP mode for channel setting and packet injection
+    wifi_mode_t mode;
+    esp_wifi_get_mode(&mode);
+    if (mode != WIFI_MODE_AP && mode != WIFI_MODE_APSTA) {
+        printf("Setting WiFi to AP mode for deauth attack\n");
+        esp_wifi_set_mode(WIFI_MODE_AP);
+        vTaskDelay(pdMS_TO_TICKS(100)); // Wait for mode change
+    }
+    
+    // Log current country code for debugging
+    wifi_country_t country;
+    if (esp_wifi_get_country(&country) == ESP_OK) {
+        printf("WiFi Country: %.2s, Channels: %d-%d\n", 
+               country.cc, country.schan, country.schan + country.nchan - 1);
+    }
+    
+    // Reset packet counter
     deauth_packets_sent = 0;
     
     if (ap_count == 0) {
@@ -2113,12 +2142,34 @@ void wifi_deauth_task(void *param) {
                 for (int i = 0; i < ap_count; i++) {
                     if (memcmp(ap_info[i].bssid, selected_aps[sel_idx].bssid, 6) == 0) {
                         int ch = ap_info[i].primary;
-                        esp_err_t err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
-                        if (err != ESP_OK) {
-                            printf("Failed to set channel %d: %s\n", ch, esp_err_to_name(err));
-                            continue;
+                        
+                        // Debug: Check current WiFi state before setting channel
+                        wifi_mode_t current_mode;
+                        uint8_t current_ch;
+                        wifi_second_chan_t current_second;
+                        esp_wifi_get_mode(&current_mode);
+                        esp_wifi_get_channel(&current_ch, &current_second);
+                        
+                        // printf("DEBUG: Attempting channel %d (current: %d, mode: %d)\n", 
+                        //        ch, current_ch, current_mode);
+
+                        // Skip if already on this channel
+                        if (ch == current_ch) {
+                            // printf("DEBUG: Already on channel %d, no change needed\n", ch);
+                        } else {
+                            bool success = wifi_set_channel_with_retry(ch, 3, 20);
+                            if (!success) {
+                                // printf("ERROR: Failed to set channel %d after retries\n", ch);
+                                // printf("  Current mode: %d, Current channel: %d\n", current_mode, current_ch);
+                                break; // Skip this AP
+                            }
+                            // printf("DEBUG: Successfully set to channel %d\n", ch);
                         }
                         vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
+                        
+                        // printf("DEBUG: Sending deauth to %02X:%02X:%02X:%02X:%02X:%02X on ch %d\n",
+                        //        ap_info[i].bssid[0], ap_info[i].bssid[1], ap_info[i].bssid[2],
+                        //        ap_info[i].bssid[3], ap_info[i].bssid[4], ap_info[i].bssid[5], ch);
                         
                         wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
                         for (int j = 0; j < station_count; j++) {
@@ -2136,13 +2187,29 @@ void wifi_deauth_task(void *param) {
             for (int i = 0; i < ap_count; i++) {
                 if (strcmp((char *)ap_info[i].ssid, (char *)selected_ap.ssid) == 0) {
                     int ch = ap_info[i].primary;
+                    
                     // Set channel only if it changed
                     if (ch != last_ch) {
-                        esp_err_t err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
-                        if (err != ESP_OK) {
-                            printf("Failed to set channel %d: %s\n", ch, esp_err_to_name(err));
-                            continue; // Skip this AP
+                        // Debug: Check current WiFi state
+                        wifi_mode_t current_mode;
+                        uint8_t current_ch;
+                        wifi_second_chan_t current_second;
+                        esp_wifi_get_mode(&current_mode);
+                        esp_wifi_get_channel(&current_ch, &current_second);
+                        
+                        // printf("DEBUG: Switching to channel %d (from: %d, mode: %d)\n", 
+                        //        ch, current_ch, current_mode);
+                        
+                        // esp_err_t err = esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                        if (ch != current_ch) {
+                            bool success = wifi_set_channel_with_retry(ch, 3, 20);
+                            if (!success) {
+                                // printf("ERROR: Failed to set channel %d after retries\n", ch);
+                                // printf("  Current mode: %d, Current channel: %d\n", current_mode, current_ch);
+                                continue; // Skip this AP
+                            }
                         }
+                        // printf("DEBUG: Successfully set to channel %d\n", ch);
                         vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
                         last_ch = ch;
                     }
@@ -2156,13 +2223,17 @@ void wifi_deauth_task(void *param) {
                 }
             }
         } else {
-            for (int ch = 1; ch <= 14; ch++) {
+            for (int ch = 1; ch <= MAX_WIFI_CHANNEL; ch++) {
                 bool channel_set = false;
                 for (int i = 0; i < ap_count; i++) {
                     if (ap_info[i].primary == ch) {
                         if (!channel_set) {
                             vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
-                            esp_wifi_set_channel(ch, WIFI_SECOND_CHAN_NONE);
+                            bool success = wifi_set_channel_with_retry(ch, 3, 20);
+                            if (!success) {
+                                printf("ERROR: Failed to set channel %d after retries\n", ch);
+                                continue; // Skip this channel
+                            }
                             channel_set = true;
                         }
                         wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
@@ -4002,11 +4073,11 @@ void wifi_manager_print_scan_results_with_oui_limit(uint16_t limit) {
 #if defined(CONFIG_IDF_TARGET_ESP32C5) || defined(CONFIG_IDF_TARGET_ESP32C6)
         {
             int ch = scanned_aps[i].primary;
-            const char *band_str = (ch > 14) ? "5GHz" : "2.4GHz";
+            const char *band_str = (ch > 14) ? "5G" : "2.4G";
             // glog("     Band: %s,\n", band_str);
 
-            glog("[%u] %s (%s)\n",
-             (unsigned)k, sanitized_ssid, band_str);
+            glog("[%u] %s (%d) (%s)\n",
+             (unsigned)k, sanitized_ssid, scanned_aps[i].rssi, band_str);
 
             
             // const char *auth_str = "Unknown";

@@ -168,7 +168,7 @@ void settings_set_defaults(FSettings *settings) {
   settings->encoder_invert_direction = false;
   settings->rgb_led_count = CONFIG_NUM_LEDS;
   settings->setup_complete = false;
-  settings->wifi_country = 0;
+  settings->wifi_country = 2; // JP: channels 1-14
 #ifdef CONFIG_WITH_STATUS_DISPLAY
   settings->status_idle_animation = IDLE_ANIM_GAME_OF_LIFE;
   settings->status_idle_timeout_ms = 5000; // default 5s
