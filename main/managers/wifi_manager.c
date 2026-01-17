@@ -3928,18 +3928,48 @@ static void wifi_manager_print_ap_entry_formatted(uint16_t idx, const wifi_ap_re
     }
 }
 void wifi_manager_print_scan_results_with_oui() {
+    // Delegate to limited version printing all results
+    wifi_manager_print_scan_results_with_oui_limit(ap_count);
+}
+
+void wifi_manager_print_scan_results_with_oui_limit(uint16_t limit) {
     if (scanned_aps == NULL) {
         glog("AP information not available\n");
         return;
     }
 
-    uint16_t limit = ap_count;
+    uint16_t total = ap_count;
+    if (total == 0) return;
 
-    for (uint16_t i = 0; i < limit; i++) {
+    // If limit is zero or greater than total, print all
+    if (limit == 0 || limit > total) limit = total;
+
+    // Create an index array and sort by RSSI descending
+    uint16_t *indices = (uint16_t *)heap_caps_malloc(sizeof(uint16_t) * total, MALLOC_CAP_8BIT);
+    if (!indices) {
+        glog("Memory allocation failed for sorting indices\n");
+        return;
+    }
+    for (uint16_t i = 0; i < total; ++i) indices[i] = i;
+
+    // Simple selection sort for small arrays (total <= MAX_SCANNED_APS)
+    for (uint16_t i = 0; i < total; ++i) {
+        uint16_t best = i;
+        for (uint16_t j = i + 1; j < total; ++j) {
+            if (scanned_aps[indices[j]].rssi > scanned_aps[indices[best]].rssi) best = j;
+        }
+        if (best != i) {
+            uint16_t tmp = indices[i];
+            indices[i] = indices[best];
+            indices[best] = tmp;
+        }
+    }
+
+    for (uint16_t k = 0; k < limit; ++k) {
+        uint16_t i = indices[k];
         char sanitized_ssid[33];
         sanitize_ssid_and_check_hidden(scanned_aps[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
 
-        // lookup vendor using oui database
         char mac_str[18];
         snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                  scanned_aps[i].bssid[0], scanned_aps[i].bssid[1], scanned_aps[i].bssid[2],
@@ -3951,7 +3981,7 @@ void wifi_manager_print_scan_results_with_oui() {
              "     BSSID: %02X:%02X:%02X:%02X:%02X:%02X,\n"
              "     RSSI: %d,\n"
              "     Channel: %d,\n",
-             i, sanitized_ssid, 
+             k, sanitized_ssid,
              scanned_aps[i].bssid[0], scanned_aps[i].bssid[1],
              scanned_aps[i].bssid[2], scanned_aps[i].bssid[3],
              scanned_aps[i].bssid[4], scanned_aps[i].bssid[5],
@@ -4017,6 +4047,8 @@ void wifi_manager_print_scan_results_with_oui() {
             glog("     Vendor: %s\n", vendor);
         }
     }
+
+    heap_caps_free(indices);
 }
 
 static void live_ap_channel_hop_timer_callback(void *arg) {

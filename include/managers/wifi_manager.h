@@ -135,6 +135,9 @@ void wifi_manager_stop_scan();
 // Print the scan results with BSSID to company mapping
 void wifi_manager_print_scan_results_with_oui();
 
+// Print top-N scan results sorted by RSSI (strongest first).
+// If limit is 0 or greater than available results, all results are printed.
+void wifi_manager_print_scan_results_with_oui_limit(uint16_t limit);
 // Function to provide access to the last scan results
 void wifi_manager_get_scan_results_data(uint16_t *count, wifi_ap_record_t **aps);
 

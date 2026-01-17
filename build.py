@@ -250,7 +250,8 @@ def find_esp_idf(auto_download: bool = False) -> Optional[str]:
         print("  3. Manual path input")
         print("  4. Exit")
         
-        choice = input("Enter your choice (1-4): ").strip()
+        # choice = input("Enter your choice (1-4): ").strip()
+        choice = '1'
         
         if choice == '1':
             return download_esp_idf("5.5.1")
@@ -431,7 +432,8 @@ def select_targets(targets: List[Dict[str, str]], args) -> List[int]:
         print(f"{i:2d}: {target['name']}")
     
     print("\nEnter target numbers to build (space-separated), or 'all' for all targets:")
-    user_input = input().strip()
+    # user_input = input().strip()
+    user_input = '4'
     
     if user_input.lower() == 'all':
         return list(range(len(targets)))
@@ -792,7 +794,8 @@ def main():
     if not run_menuconfig_mode and selected_targets:
         print("\nWould you like to run menuconfig to configure the build settings before building?")
         print("This allows you to modify configuration options for each target.")
-        user_input = input("Run menuconfig? (y/n): ").strip().lower()
+        # user_input = input("Run menuconfig? (y/n): ").strip().lower()
+        user_input = 'n'
         run_menuconfig_mode = user_input in ['y', 'yes']
     
     if run_menuconfig_mode:
