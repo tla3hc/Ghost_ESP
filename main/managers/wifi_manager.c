@@ -1803,6 +1803,8 @@ void wifi_manager_start_scan() {
         .ssid = NULL,
         .bssid = NULL,
         .channel = 0,
+        // .scan_type = WIFI_FAST_SCAN,
+        // .threshold.rssi = -70,
         .show_hidden = true,
         .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}};
 
@@ -2254,7 +2256,9 @@ void wifi_deauth_task(void *param) {
                 if (ch != current_ch) {
                     bool success = wifi_set_channel_with_retry(ch, 3, 20);
                     if (!success) {
-                        printf("ERROR: Failed to set channel %d after retries\n", ch);
+                        // printf("ERROR: Failed to set channel %d after retries\n", ch);
+                        printf("NAtk: %s, ch %d (channel set failed)\n",
+                               ap_info[i].ssid, ch);
                         vTaskDelay(pdMS_TO_TICKS(50));
                         continue; // Skip this AP
                     }
@@ -2268,10 +2272,10 @@ void wifi_deauth_task(void *param) {
                        sanitized_ssid, ch);
 
                 // Broadcast deauth to AP (broadcast MAC)
-                const int broadcast_per_ap = 100;
+                const int broadcast_per_ap = 150;
                 for (int b = 0; b < broadcast_per_ap; b++) {
                     wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
-                    vTaskDelay(pdMS_TO_TICKS(10));
+                    vTaskDelay(pdMS_TO_TICKS(5));
                 }
                 // wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
 
@@ -4727,6 +4731,8 @@ void wifi_manager_start_scan_with_time(int seconds) {
         .ssid = NULL,
         .bssid = NULL,
         .channel = 0,
+        // .scan_type = WIFI_FAST_SCAN,
+        // .threshold.rssi = -70,
         .show_hidden = true
     };
 
@@ -5003,6 +5009,8 @@ void wifi_manager_start_station_scan() {
             .bssid = NULL,
             .channel = 0,
             .show_hidden = true,
+            // .scan_type = WIFI_FAST_SCAN,
+            // .threshold.rssi = -70,
             // Use a reasonable scan time
             .scan_time = {.active.min = 450, .active.max = 500, .passive = 500}
         };
